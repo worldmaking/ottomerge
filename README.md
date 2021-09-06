@@ -1,2 +1,2 @@
 # ottomerge
-Automerge experiments
+mischmasch automerge lib
