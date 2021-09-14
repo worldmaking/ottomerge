@@ -1,7 +1,4 @@
 const Automerge = require('automerge')
-const got = require('gotlib')
-const fs = require('fs')
-const { connected } = require('process')
 const _ = require('lodash')
 
 
