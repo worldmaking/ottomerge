@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      /* remove extra spacing around elements so we can fill the available page */
+      * {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      // import indexedDB module for storing sessions
+      import { openDB, deleteDB } from 'https://unpkg.com/idb?module'
+      // check for support for IDB
+      (() => {
+        'use strict'
+
+        if (!('indexedDB' in window)) {
+          console.warn('IndexedDB not supported')
+          return
+        }
+
+        //...IndexedDB code
+      })()
+
+      // //!TODO work with indexedDB to store automerge sessions between sessions
+      // https://www.freecodecamp.org/news/a-quick-but-complete-guide-to-indexeddb-25f030425501/
+
+
+      // import automerge module
+      import Automerge from 'https://cdn.skypack.dev/automerge@1.0.1-preview.4';
+      
+      // lodash for working with objs in automerge
+      import * as _ from 'https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js';
+
+      // import the Three.js module:
+      import * as THREE from 'https://unpkg.com/three@0.126.0/build/three.module.js';
+
+      // Our Javascript will go here.
+
+      // do this now and whenever the window is resized()
+      window.addEventListener(
+        'resize',
+        function () {
+          // ensure the renderer fills the page, and the camera aspect ratio matches:
+          renderer.setSize(window.innerWidth, window.innerHeight);
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+        },
+        false
+      );
+
+      // create a renderer with better than default quality:
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+
+      // enable XR option in the renderer
+      renderer.xr.enabled = true;
+
+      // load in the VRButton module for the "Enter VR" button
+      import { VRButton } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/webxr/VRButton.js';
+      document.body.appendChild(VRButton.createButton(renderer));
+
+      renderer.setPixelRatio(window.devicePixelRatio);
+      // make it fill the page
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      // create and add the <canvas>
+      document.body.appendChild(renderer.domElement);
+
+      // stats module:
+      // load in the module:
+      import Stats from 'https://unpkg.com/three@0.126.0/examples/jsm/libs/stats.module';
+
+      // add a stats view to the page to monitor performance:
+      const stats = new Stats();
+      document.body.appendChild(stats.dom);
+
+      const camera = new THREE.PerspectiveCamera(
+        75, // this camera has a 75 degree field of view in the vertical axis
+        window.innerWidth / window.innerHeight, // the aspect ratio matches the size of the window
+        0.05, // anything less than 5cm from the eye will not be drawn
+        100 // anything more than 100m from the eye will not be drawn
+      );
+      // position the camera 2m in the Z axis and 1.5m in the Y axis
+      // the Y axis points up from the ground
+      // the Z axis point out of the screen toward you
+      camera.position.y = 1.5;
+      camera.position.z = 2;
+
+      // create the root of a scene graph
+      const scene = new THREE.Scene();
+
+      // blank document
+      let doc = {
+        nodes: {},
+        arcs: {},
+      };
+      let incomingDeltas = [];
+
+      // make a local automerge doc from our scene
+      let doc1 = Automerge.from(doc);
+      const actorID = Automerge.getActorId(doc1).toString()
+      // pass new changes to here
+      
+
+      let syncStates = {}
+      syncStates[actorID] = Automerge.initSyncState()
+      let backends = {}
+
+      console.log('actorid', actorID)
+      let nodeCounter = 0;
+
+      // let library = {
+      //   cube: ,
+      // };
+
+      const light = new THREE.HemisphereLight(0xfff0f0, 0x606066);
+      scene.add(light);
+
+      const clock = new THREE.Clock();
+
+      import { PointerLockControls } from 'https://unpkg.com/three@0.126.0/examples/jsm/controls/PointerLockControls.js';
+
+      const controls = new PointerLockControls(camera, document.body);
+      scene.add(controls.getObject());
+
+      // Pointer lock requires a user action to start, e.g. click on canvas to start pointerlock:
+      renderer.domElement.addEventListener('click', function () {
+        controls.lock();
+      });
+      // get callbacks when this happens:
+      controls.addEventListener('lock', function () {
+        /* e.g. hide "click to look" instructions */
+      });
+      controls.addEventListener('unlock', function () {
+        /* e.g. show "click to look" instructions */
+      });
+
+      controls.keys = {
+        LEFT: 'ArrowLeft', //left arrow
+        UP: 'ArrowUp', // up arrow
+        RIGHT: 'ArrowRight', // right arrow
+        BOTTOM: 'ArrowDown', // down arrow
+      };
+      document.addEventListener('keydown', function (event) {
+        switch (event.code) {
+          case 'Space':
+            // add a cube
+            let addCube = {
+              op: 'newnode',
+              path: 'cube_' + nodeCounter,
+              kind: 'cube',
+              orient: [
+                Math.random(),
+                Math.random(),
+                Math.random(),
+                Math.random(),
+              ],
+              pos: [Math.random(), Math.random() + 1, Math.random()],
+              colour: '#' + Math.floor(Math.random() * 16777215).toString(16),
+            };
+
+            incomingDeltas.push(addCube);
+            nodeCounter++;
+            break;
+        }
+      });
+      var history = [];
+      var historyPosition;
+      document.addEventListener('keyup', function (event) {
+        switch (event.code) {
+          case 'Space':
+            break;
+
+
+            //! NOTE:: Moving forward/back in history doesn't apply them as changes, just loads the scene at that state.
+          // move forward in history
+          case 'ArrowRight':
+            if(historyPosition >= (history.length - 1)){
+              console.log('end of document history reached')
+            } else {
+              historyPosition = historyPosition + 1
+              scene.remove.apply(scene, scene.children);
+              // rebuild the scene from updated automerge document
+              buildScene(history[historyPosition][1]);
+            }
+
+            break;
+
+          // move backward in history
+          case 'ArrowLeft':
+            if(historyPosition <= 0){
+                console.log('end of document history reached')
+              } else {
+                historyPosition = historyPosition - 1
+                scene.remove.apply(scene, scene.children);
+                // rebuild the scene from updated automerge document
+                buildScene(history[historyPosition][1]);
+              }
+          break;
+        }
+      });
+
+
+      // websocket
+      var ws = new WebSocket('ws://localhost:3000');
+
+      // When the connection is open, send some data to the server
+      ws.onopen = function () {
+        let msg = JSON.stringify({
+          cmd: 'actorID',
+          data: actorID,
+          date: Date.now()
+        })
+        ws.send(msg);
+
+        // 
+      };
+
+      // Log errors
+      ws.onerror = function (error) {
+        console.log('WebSocket Error ' + error);
+      };
+
+      // Log messages from the server
+      ws.onmessage = function (e) {
+        
+        let msg
+        try {
+          msg = JSON.parse(e.data)
+        } catch (e) {
+          console.log(typeof e)
+        }
+
+        switch (msg.cmd){
+          case 'changes':
+            console.log(typeof msg.data)
+            if(msg.actorID !== actorID){
+              let changes = msg.data
+              let [newDoc, patch] = Automerge.applyChanges(doc1, changes)
+              // merge the changes here. 
+              console.log(msg.data)
+            }
+          break
+
+          case 'actorID':
+            // add a sync state for a new peer
+            syncStates[msg.data] = Automerge.initSyncState()
+
+          break
+        }
+      };
+
+      function updatePeers() {
+        Object.entries(syncStates).forEach(([peer, syncState]) => {
+          console.log('updatePeers', peer, syncState)
+          const [nextSyncState, syncMessage] = Automerge.Backend.generateSyncMessage(
+            doc1,
+            syncState,
+          )
+          console.log(nextSyncState, syncMessage)
+          // syncStates[peer] = { ...syncStates[peer], [actorID]: nextSyncState }
+          // if (syncMessage) {
+          //   msg = JSON.stringify({
+          //     actorID, source: workerId, target: peer, syncMessage,
+          //   })
+          //   console.log(msg)
+          // }
+        })
+      }
+      // deltas
+      let changes
+      
+      function applyDelta(delta) {
+        switch (delta.op) {
+          case 'propchange':
+            break;
+
+          case 'repath':
+            break;
+
+          case 'newnode':
+            // get the path, check if its a parent-most node or if it is a child node
+            let path = delta.path;
+            let fullPath = path.split('.');
+            // is the node a parent?
+            if (fullPath.length == 1) {
+              // add parent node to scene
+              var newDoc = Automerge.change(doc1, 'newnode', (doc) => {
+                // create the node
+                doc.nodes[path] = {};
+                // remove the op and path props so that we just add the _props to the node in the doc
+                delete delta.op;
+                delete delta.path;
+                doc.nodes[path]['_props'] = delta;
+                // otherObject[delta.path] = delta._props
+              });
+              updatePeers()
+              // changes = Automerge.getChanges(doc1, newDoc)
+              // console.log('newnode changes', typeof changes, changes)
+              // var msg = JSON.stringify({
+              //   cmd: 'changes',
+              //   data: changes,
+              //   actorID: actorID,
+              //   date: Date.now()
+              // })
+              // ws.send(msg)
+            } else {
+              delete delta.op;
+              path = delta.path;
+              delete delta.path;
+              doc1 = Automerge.change(doc1, 'newnode', (doc) => {
+                _.set(doc.nodes, path, { _props: delta });
+              });
+              // changes = Automerge.getChanges(doc1, newDoc)
+
+              // var msg = JSON.stringify({
+              //   cmd: 'changes',
+              //   data: changes,
+              //   actorID: actorID,
+              //   date: Date.now()
+              // })
+              // ws.send(msg)
+            }
+
+            break;
+
+          case 'delnode':
+            doc1 = Automerge.change(doc1, 'delnode', (doc) => {
+              _.unset(doc.nodes, delta.path);
+            });
+            // changes = Automerge.getChanges(doc1, newDoc)
+
+            // var msg = JSON.stringify({
+            //   cmd: 'changes',
+            //   data: changes,
+            //   actorID: actorID,
+            //   date: Date.now()
+            // })
+            // ws.send(msg)
+            break;
+
+          // connection delta
+          case 'connect':
+            arc = delta.paths;
+            src = arc[0];
+            dest = arc[1];
+
+            doc1 = Automerge.change(doc1, 'connect', (doc) => {
+              // does the src have an arc?
+              if (doc.arcs[src]) {
+                // add connection to the dest
+                doc.arcs[src].push(dest);
+              } else {
+                // add src obj and add connection the dest
+                doc.arcs[src] = [dest];
+              }
+            });
+            // changes = Automerge.getChanges(doc1, newDoc)
+
+            // var msg = JSON.stringify({
+            //   cmd: 'changes',
+            //   data: changes,
+            //   actorID: actorID,
+            //   date: Date.now()
+            // })
+            // ws.send(msg)
+            break;
+
+          // disconnection delta
+          case 'disconnect':
+            src = delta.paths[0];
+            unpatch = doc1.arcs[src].indexOf(delta.paths[1]);
+            doc1 = Automerge.change(doc1, 'disconnect', (doc) => {
+              // remove arc
+              doc.arcs[src].splice(unpatch, 1);
+              // if src has no more connections:
+              if (doc.arcs[src].length == 0) {
+                delete doc.arcs[src];
+              }
+            });
+            // changes = Automerge.getChanges(doc1, newDoc)
+
+            // var msg = JSON.stringify({
+            //   cmd: 'changes',
+            //   data: changes,
+            //   actorID: actorID,
+            //   date: Date.now()
+            // })
+            // ws.send(msg)
+            break;
+          default:
+            console.log('delta not defined in switchcase', delta.op);
+        }
+
+        // changes = Automerge.getChanges(doc1, newDoc)
+        // console.log(changes)        
+        // var msg = JSON.stringify({
+        //   cmd: 'changes',
+        //   data: changes,
+        //   actorID: actorID,
+        //   date: Date.now()
+        // })
+        // ws.send(msg)
+
+        history = Automerge.getHistory(newDoc).map((state) => [
+          state.change.message,
+          state.snapshot,
+        ]);
+
+        historyPosition = history.length - 1
+      }
+
+      let handleDelta = function (d) {
+        if (d instanceof Array) {
+          for (var i = 0; i < d.length; i++) {
+            handleDelta(d[i]);
+          }
+        } else applyDelta(d);
+      };
+
+
+      // handleDelta(deltas)
+      let dirty = false;
+
+      function buildScene(b) {
+        // NOTE! for now we're just dealing with parent-most nodes. Will need to write a deep traverse function later to visit child nodes (i.e. inlets, outlets, knobs, abstractions)
+        let nodes = Object.keys(b.nodes);
+
+        var created = [];
+        for (var i = 0; i < nodes.length; i++) {
+          let thisNode = nodes[i];
+
+          let props = b.nodes[thisNode]._props;
+
+          // for now, just instance a cube.
+          // set geometry according to UI needs
+          let moduleHeight = 1;
+          let moduleWidth = 1;
+          let geometry = new THREE.BoxGeometry(moduleWidth, moduleHeight, 0.15);
+
+          let material = new THREE.MeshStandardMaterial({
+            color: props.colour,
+          });
+          created[i] = new THREE.Mesh(geometry, material);
+          // get this cube's properties from the mischmasch graph
+          created[i].position.x = props.pos[0];
+          created[i].position.y = props.pos[1];
+          created[i].position.z = props.pos[2];
+
+          // this is probably incorrect, just using orientation as rotation crudely for now
+          created[i].rotation.w = props.orient[0];
+          created[i].rotation.x = props.orient[1];
+          created[i].rotation.y = props.orient[2];
+          created[i].rotation.z = props.orient[3];
+
+          scene.add(created[i]);
+        }
+
+        // re-add the lighting
+        scene.add(light);
+      }
+
+      function animate() {
+        // get current timing:
+        const dt = clock.getDelta();
+        const t = clock.getElapsedTime();
+
+        if (controls.isLocked === true) {
+          // use move properties and controls.moveRight() / controls.moveForward() to modify camera...
+          // use controls.getObject().position for navigation limits / collisions etc.
+          // [See example code](https://threejs.org/examples/#misc_controls_pointerlock)
+        }
+
+        // handle scene changes:
+        if (incomingDeltas.length > 0) {
+          // handle incoming deltas:
+          while (incomingDeltas.length > 0) {
+            let delta = incomingDeltas.shift();
+            try {
+              handleDelta(delta);
+            } catch (e) {
+              console.warn(e);
+            }
+          }
+          // clear scene, then...
+          scene.remove.apply(scene, scene.children);
+          // rebuild the scene from updated automerge document
+          buildScene(doc1);
+        }
+
+        // draw the scene:
+        renderer.render(scene, camera);
+      }
+      // start!
+      renderer.setAnimationLoop(animate);
+    </script>
+  </body>
+</html>

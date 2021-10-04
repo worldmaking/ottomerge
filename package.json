@@ -4,7 +4,8 @@
   "description": "Automerge experiments",
   "main": "index.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "start": "node server.js"
   },
   "repository": {
     "type": "git",
@@ -18,8 +19,11 @@
   "homepage": "https://github.com/worldmaking/ottomerge#readme",
   "dependencies": {
     "automerge": "^1.0.1-preview.4",
+    "express": "^4.17.1",
     "gotlib": "^1.0.2",
-    "lodash": "^4.17.21"
+    "http": "0.0.1-security",
+    "lodash": "^4.17.21",
+    "ws": "^8.2.2"
   },
   "devDependencies": {
     "jest": "^27.1.0"
